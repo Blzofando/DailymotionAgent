@@ -1,0 +1,29 @@
+# DailymotionAgent — Dependências Python
+# Instale com: pip install -r requirements.txt
+
+# Telegram MTProto (download de vídeos pesados)
+telethon==1.36.0
+
+# Telegram Bot API (dashboard de controle)
+python-telegram-bot==21.5
+
+# Supabase (banco de dados)
+supabase==2.9.1
+
+# Google Gemini (LLM para SEO) — SDK nova compatível com Python 3.14+
+google-genai==1.10.0
+
+# HTTP assíncrono (upload streamado)
+httpx==0.27.2
+
+# Variáveis de ambiente
+python-dotenv==1.0.1
+
+# Fuzzy matching (casamento reverso de sinopse)
+rapidfuzz==3.9.3
+
+# FFmpeg wrapper Python
+ffmpeg-python==0.2.0
+
+# Utilitários
+aiofiles==24.1.0
