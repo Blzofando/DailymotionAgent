@@ -29,6 +29,7 @@ from modules.quota_manager import get_quota_status
 from modules.seo_engine import generate_seo_package
 from modules.uploader import run_upload_pipeline
 from modules.scraper import extract_title_from_caption
+from modules.validator import run_full_mining_cycle
 from bot.keyboards import (
     lobby_keyboard,
     title_carousel_keyboard,
@@ -133,6 +134,15 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "refresh":
         await _show_lobby(update, ctx, edit=True)
+
+    elif data == "trigger_mining":
+        await query.answer("⛏️ Iniciando varredura profunda no canal... Isso fará uma busca demorada.", show_alert=True)
+        await query.edit_message_text(
+            "⏳ *Varredura em background rodando...*\nIsso pode levar de 2 a 10 minutos dependendo da IA e dos downloads de capa. Não se preocupe, quando os novos vídeos forem encontrados eu irei atualizar o banco de dados. Volte aqui e clique em 'Atualizar Painel' no menu /start mais tarde.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        # Roda em background para não bugar o callback que tem timeout de 60s
+        asyncio.create_task(_run_background_mining(ctx, update.effective_chat.id))
 
     elif data.startswith("validate_"):
         slot = int(data.split("_")[1])
@@ -414,6 +424,22 @@ async def _trigger_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE, slot: 
         db.update_vitrine_slot(slot, {"status": "validated"})  # Reverte lock
         await query.edit_message_text(f"❌ Erro no upload:\n`{str(e)[:300]}`", parse_mode=ParseMode.MARKDOWN)
 
+
+# ------------------------------------------------------------------ #
+#  Mineração em Background
+# ------------------------------------------------------------------ #
+
+async def _run_background_mining(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    try:
+        await run_full_mining_cycle()
+        await ctx.bot.send_message(
+            chat_id=chat_id, 
+            text="✅ *Mineração concluída!* ⛏️ Novos doramas (ou a falta deles) já foram processados. Clique em /start para ver o painel.", 
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error("[BOT] Erro na mineração manual: %s", e)
+        await ctx.bot.send_message(chat_id=chat_id, text=f"❌ Erro na mineração manual: {e}")
 
 # ------------------------------------------------------------------ #
 #  Fábrica do Bot

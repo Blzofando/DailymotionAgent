@@ -31,8 +31,11 @@ def lobby_keyboard(slots: list[dict], quota_visible: int) -> InlineKeyboardMarku
 
         buttons.append(row)
 
-    # Botão de atualizar dashboard
-    buttons.append([InlineKeyboardButton("🔄 Atualizar Painel", callback_data="refresh")])
+    # Botões de controle
+    buttons.append([
+        InlineKeyboardButton("🔄 Atualizar Painel", callback_data="refresh"),
+        InlineKeyboardButton("⛏️ Forçar Mineração", callback_data="trigger_mining")
+    ])
     return InlineKeyboardMarkup(buttons)
 
 
