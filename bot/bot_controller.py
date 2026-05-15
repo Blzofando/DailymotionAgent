@@ -41,6 +41,7 @@ from bot.keyboards import (
     thumbnail_carousel_keyboard,
     video_match_keyboard,
     remove_reason_keyboard,
+    view_full_keyboard,
 )
 
 logger = logging.getLogger(__name__)
