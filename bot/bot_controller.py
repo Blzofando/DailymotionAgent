@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import html
 
 from telegram import Update
 from telegram.error import BadRequest
@@ -57,6 +58,15 @@ def admin_only(func):
             return
         return await func(update, ctx)
     return wrapper
+
+
+def escape_markdown(text: str) -> str:
+    """Escapa caracteres reservados do Markdown do Telegram."""
+    if not text:
+        return ""
+    # No Markdown clássico do Telegram, apenas _, *, ` e [ precisam ser escapados
+    # se não forem destinados a formatação.
+    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
 
 # ------------------------------------------------------------------ #
@@ -283,7 +293,7 @@ async def _handle_view_full(update: Update, ctx: ContextTypes.DEFAULT_TYPE, slot
     desc = slot_data.get("approved_description", "")
     thumb = slot_data.get("thumbnail_url", "")
     
-    caption_text = f"🎬 *Título SEO:*\n{title}\n\n📝 *Descrição Completa:*\n{desc}"
+    caption_text = f"🎬 *Título SEO:*\n{escape_markdown(title)}\n\n📝 *Descrição Completa:*\n{escape_markdown(desc)}"
     kb = view_full_keyboard(slot)
     
     await update.callback_query.message.delete()
@@ -350,7 +360,7 @@ async def _render_title_step(update: Update, ctx: ContextTypes.DEFAULT_TYPE, slo
 
     text = (
         f"🏷️ *PASSO 1/4: Escolha o Título (Slot {slot})*\n\n"
-        f"Opção Atual:\n> {current_title}"
+        f"Opção Atual:\n> {escape_markdown(current_title)}"
     )
     kb = title_carousel_keyboard(slot, idx, len(titles))
     if update.callback_query:
@@ -411,7 +421,7 @@ async def _render_desc_step(update: Update, ctx: ContextTypes.DEFAULT_TYPE, slot
     idx = _session.get(f"slot_{slot}_desc_idx", 0)
     current_desc = descs[idx] if descs else "Sem descrição"
 
-    text = f"📝 *PASSO 2/4: Revisão da Descrição (Slot {slot})*\n\n{current_desc}"
+    text = f"📝 *PASSO 2/4: Revisão da Descrição (Slot {slot})*\n\n{escape_markdown(current_desc)}"
     kb = description_carousel_keyboard(slot)
     if update.callback_query:
         await update.callback_query.edit_message_text(
@@ -607,7 +617,7 @@ async def _step_video_match(update: Update, ctx: ContextTypes.DEFAULT_TYPE, slot
 
     text = (
         f"🎥 *PASSO 4/4: Confirmação do Arquivo (Slot {slot})*\n\n"
-        f"Título aprovado: *{title}*\n\n"
+        f"Título aprovado: *{escape_markdown(title)}*\n\n"
         f"O vídeo associado a esta sinopse está correto?\n"
         f"*(O arquivo original foi encaminhado acima para você conferir)*"
     )
