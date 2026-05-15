@@ -143,9 +143,13 @@ async def _show_lobby(update: Update, ctx: ContextTypes.DEFAULT_TYPE, edit: bool
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
-            await update.callback_query.edit_message_text(
-                text=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await update.callback_query.edit_message_text(
+                    text=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN
+                )
+            except BadRequest as e:
+                if "Message is not modified" not in str(e):
+                    raise e
     else:
         msg = update.message or (update.callback_query.message if update.callback_query else None)
         if msg:
