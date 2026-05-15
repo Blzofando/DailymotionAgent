@@ -99,20 +99,27 @@ def extract_title_from_caption(caption: str) -> str:
 # ------------------------------------------------------------------ #
 
 class TelegramScraper:
-    def __init__(self):
-        self.client = TelegramClient(
-            config.telegram.session_name,
-            config.telegram.api_id,
-            config.telegram.api_hash,
-        )
+    def __init__(self, client: Optional[TelegramClient] = None):
+        self._owns_client = False
+        if client:
+            self.client = client
+        else:
+            self.client = TelegramClient(
+                config.telegram.session_name,
+                config.telegram.api_id,
+                config.telegram.api_hash,
+            )
+            self._owns_client = True
 
     async def __aenter__(self):
-        await self.client.start()
-        logger.info("[SCRAPER] Telethon conectado como usuário MTProto")
+        if self._owns_client:
+            await self.client.start()
+            logger.info("[SCRAPER] Telethon conectado como usuário MTProto")
         return self
 
-    async def __aexit__(self, *args):
-        await self.client.disconnect()
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._owns_client:
+            await self.client.disconnect()
 
     # -------------------------------------------------------------- #
     #  FASE 1: Varredura de Vídeos Longos
@@ -152,8 +159,10 @@ class TelegramScraper:
                 continue
 
             # Verifica anti-duplicata antes de adicionar
-            if db.check_duplicate(doc.file_unique_id):
-                logger.debug("[SCRAPER] Ignorado (duplicata): %s", doc.file_unique_id)
+            unique_id = str(doc.id)
+            title = extract_title_from_caption(message.message or "")
+            if db.check_duplicate(unique_id, title):
+                logger.debug("[SCRAPER] Ignorado (duplicata): %s | %s", unique_id, title)
                 continue
 
             # Conta reações
@@ -165,7 +174,7 @@ class TelegramScraper:
             candidate = VideoCandidate(
                 msg_id=message.id,
                 channel_id=message.peer_id.channel_id if hasattr(message.peer_id, "channel_id") else 0,
-                file_unique_id=doc.file_unique_id,
+                file_unique_id=unique_id,
                 caption=message.message or "",
                 duration_sec=duration,
                 file_size_bytes=doc.size,
@@ -278,31 +287,7 @@ class TelegramScraper:
             if result:
                 video.synopsis, video.synopsis_msg_id = result
 
-        # Persiste no Supabase
-        inserted = 0
-        for video in selected:
-            record = {
-                "file_unique_id": video.file_unique_id,
-                "msg_id": video.msg_id,
-                "channel_id": video.channel_id,
-                "caption": video.caption,
-                "duration_sec": video.duration_sec,
-                "file_size_bytes": video.file_size_bytes,
-                "views": video.views,
-                "reactions": video.reactions,
-                "synopsis": video.synopsis,
-                "synopsis_msg_id": video.synopsis_msg_id,
-                "status": "reserve",
-            }
-            result = db.insert_candidate(record)
-            if result:
-                video_with_id = result  # Supabase retorna o ID
-                inserted += 1
-
-        logger.info(
-            "[SCRAPER] %d/%d candidatos novos persistidos no Supabase",
-            inserted, len(selected)
-        )
+        logger.info("[SCRAPER] %d candidatos prontos em memória (sem persistência no banco).", len(selected))
         return selected
 
 

@@ -16,14 +16,14 @@ def lobby_keyboard(slots: list[dict], quota_visible: int) -> InlineKeyboardMarku
         status = slot.get("status", "awaiting_validation")
 
         if status == "awaiting_validation":
-            row = [InlineKeyboardButton(f"⚙️ Validar Slot {n}", callback_data=f"validate_{n}")]
+            row = [InlineKeyboardButton(f"⚙️ Validar INFO (Slot {n})", callback_data=f"validate_{n}")]
         elif status == "validated":
             row = [
-                InlineKeyboardButton(f"🚀 ENVIAR SLOT {n}", callback_data=f"send_{n}"),
-                InlineKeyboardButton(f"✏️ Re-editar", callback_data=f"validate_{n}"),
+                InlineKeyboardButton(f"🚀 POSTAR (Slot {n})", callback_data=f"send_{n}"),
+                InlineKeyboardButton(f"❌ Remover", callback_data=f"remove_prompt_{n}"),
             ]
         elif status == "uploading":
-            row = [InlineKeyboardButton(f"⏳ Slot {n} em Envio...", callback_data="noop")]
+            row = [InlineKeyboardButton(f"⏳ Enviando...", callback_data="noop")]
         elif status == "posted":
             row = [InlineKeyboardButton(f"✅ Slot {n} Postado", callback_data="noop")]
         else:
@@ -38,6 +38,29 @@ def lobby_keyboard(slots: list[dict], quota_visible: int) -> InlineKeyboardMarku
     ])
     return InlineKeyboardMarkup(buttons)
 
+def view_full_keyboard(slot: int) -> InlineKeyboardMarkup:
+    """Teclado para o painel de visualização completa antes da postagem."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬅️ Voltar", callback_data="refresh"),
+            InlineKeyboardButton("✏️ Editar Info", callback_data=f"validate_{slot}")
+        ],
+        [
+            InlineKeyboardButton("🚀 POSTAR AGORA", callback_data=f"send_{slot}")
+        ]
+    ])
+
+
+def remove_reason_keyboard(slot: int) -> InlineKeyboardMarkup:
+    """Sub-menu para o motivo de remoção."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🗑️ Já postei antes", callback_data=f"remove_history_{slot}"),
+            InlineKeyboardButton("👎 Não gostei", callback_data=f"remove_discard_{slot}")
+        ],
+        [InlineKeyboardButton("⬅️ Cancelar", callback_data="refresh")]
+    ])
+
 
 def title_carousel_keyboard(slot: int, current: int, total: int) -> InlineKeyboardMarkup:
     """Navegação de títulos no Passo 1/4 do túnel."""
@@ -48,6 +71,7 @@ def title_carousel_keyboard(slot: int, current: int, total: int) -> InlineKeyboa
             InlineKeyboardButton("Próxima ▶️", callback_data=f"title_next_{slot}_{current}"),
         ],
         [InlineKeyboardButton("✅ Confirmar Título", callback_data=f"title_confirm_{slot}_{current}")],
+        [InlineKeyboardButton("✏️ Edição Manual", callback_data=f"edit_manual_title_{slot}")]
     ])
 
 
@@ -59,6 +83,7 @@ def description_carousel_keyboard(slot: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Próxima ▶️", callback_data=f"desc_next_{slot}"),
         ],
         [InlineKeyboardButton("✅ Confirmar Descrição", callback_data=f"desc_confirm_{slot}")],
+        [InlineKeyboardButton("✏️ Edição Manual", callback_data=f"edit_manual_desc_{slot}")]
     ])
 
 
@@ -70,7 +95,11 @@ def thumbnail_carousel_keyboard(slot: int, current: int, total: int) -> InlineKe
             InlineKeyboardButton(f"{current+1}/{total}", callback_data="noop"),
             InlineKeyboardButton("Próxima Capa ▶️", callback_data=f"thumb_next_{slot}_{current}"),
         ],
-        [InlineKeyboardButton("✅ Confirmar Capa", callback_data=f"thumb_confirm_{slot}_{current}")],
+        [
+            InlineKeyboardButton("✅ Confirmar Capa", callback_data=f"thumb_confirm_{slot}_{current}"),
+            InlineKeyboardButton("❌ Pular/Sem Capa", callback_data=f"thumb_skip_{slot}")
+        ],
+        [InlineKeyboardButton("✏️ Enviar Capa Manual", callback_data=f"edit_manual_thumb_{slot}")]
     ])
 
 

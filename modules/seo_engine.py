@@ -37,14 +37,29 @@ _GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 # Limit total de chars da descrição Dailymotion
 DM_DESC_LIMIT = 3000
 
-# Gatilhos de status disponíveis
-STATUS_TRIGGERS = [
-    "🎬 COMPLETO:",
-    "🔥 DUBLADO:",
-    "⚡ ÉPICO:",
-    "👑 EXCLUSIVO:",
-]
+def get_dynamic_triggers(caption: str) -> list[str]:
+    """
+    Analisa a legenda original para saber se o vídeo atual é Dublado ou Legendado.
+    Regra do usuário: Se diz 'legendado' mas tem um link de redirecionamento, a versão atual é DUBLADA.
+    Se não referenciar nada, ou não especificar, a versão atual é LEGENDADA.
+    """
+    caption_lower = caption.lower()
+    is_dubbed = False
+    
+    if "dublado" in caption_lower:
+        is_dubbed = True
+        
+    # Se a legenda menciona a versão legendada em um link, o vídeo atual é dublado!
+    if "legendad" in caption_lower:
+        if "http" in caption_lower or "t.me" in caption_lower or "@" in caption_lower or "link" in caption_lower:
+            is_dubbed = True
+        else:
+            is_dubbed = False
 
+    if is_dubbed:
+        return ["🔥 DUBLADO:", "🎬 COMPLETO DUBLADO:", "🍿 NOVO DUBLADO:"]
+    else:
+        return ["🎬 LEGENDADO:", "📺 COMPLETO LEGENDADO:", "🍿 NOVO LEGENDADO:"]
 
 # ------------------------------------------------------------------ #
 #  1. Autocomplete de Título (YouTube Suggest)
@@ -79,7 +94,7 @@ async def fetch_autocomplete(title_base: str, max_results: int = 5) -> list[str]
         return []
 
 
-def pick_best_complement(title_base: str, suggestions: list[str]) -> str:
+def pick_best_complement(title_base: str, suggestions: list[str], is_dubbed: bool = False) -> str:
     """
     Extrai o COMPLEMENTO relevante da melhor sugestão.
     Ex: 'Ouvi Pensamentos Dele e me Vinguei dublado completo' → 'Dublado Completo'
@@ -90,11 +105,12 @@ def pick_best_complement(title_base: str, suggestions: list[str]) -> str:
         complement = suggestion.lower().replace(title_lower, "").strip()
         if len(complement) > 3:
             return complement.title()
-    # Fallback padrão
-    return "Dublado Completo"
+            
+    # Fallback padrão baseado no status
+    return "Dublado Completo" if is_dubbed else "Legendado Completo"
 
 
-def build_seo_title(title_base: str, complement: str, trigger: str = STATUS_TRIGGERS[0]) -> str:
+def build_seo_title(title_base: str, complement: str, trigger: str) -> str:
     """
     Monta o título SEO seguindo a estrutura rígida da documentação:
     [Gatilho de Status] + [Título Base Congelado] + [Complemento do Autocomplete]
@@ -104,13 +120,16 @@ def build_seo_title(title_base: str, complement: str, trigger: str = STATUS_TRIG
     return title[:255]
 
 
-async def generate_title_variants(title_base: str) -> list[str]:
-    """Gera 3 variações de título usando diferentes gatilhos e complementos."""
+async def generate_title_variants(title_base: str, caption: str) -> list[str]:
+    """Gera 3 variações de título usando diferentes gatilhos e complementos baseados no status."""
+    triggers = get_dynamic_triggers(caption)
+    is_dubbed = "DUBLADO" in triggers[0]
+    
     suggestions = await fetch_autocomplete(title_base)
-    complement = pick_best_complement(title_base, suggestions)
+    complement = pick_best_complement(title_base, suggestions, is_dubbed)
 
     variants = []
-    for trigger in STATUS_TRIGGERS[:3]:
+    for trigger in triggers[:3]:
         variants.append(build_seo_title(title_base, complement, trigger))
     return variants
 
@@ -119,24 +138,20 @@ async def generate_title_variants(title_base: str) -> list[str]:
 #  2. Sinopse Reescrita pelo Gemini
 # ------------------------------------------------------------------ #
 
-_SYNOPSIS_PROMPT = """Você é um copywriter especialista em conteúdo de mini-dramas asian
-para o público brasileiro. Sua missão é reescrever a sinopse abaixo de forma 100% original
-e magnética para o Dailymotion.
+_SYNOPSIS_PROMPT = """Você é um copywriter especialista em conteúdo de mini-dramas.
+Sua missão é melhorar a sinopse abaixo de forma magnética para o Dailymotion.
 
 REGRAS ABSOLUTAS:
-1. Mantenha os nomes dos personagens exatamente como estão
+1. Mantenha os nomes dos personagens exatamente como estão.
 2. NÃO altere o título da obra: "{titulo}"
-3. Comece com um gancho emocional forte (1 frase impactante)
-4. Desenvolva a trama em 2-3 parágrafos curtos e envolventes
-5. Termine deixando suspense — sem spoiler do final
-6. Tom: dramático, apaixonado, urgente
-7. Máximo 800 caracteres no total
-8. Escreva em português brasileiro fluente e natural
+3. Escreva um gancho emocional forte e desenvolva a trama mantendo o suspense.
+4. OBRIGATÓRIO: Você NÃO PODE EXCLUIR os links, créditos, avisos, ou mensagens administrativas presentes no texto original. Tudo o que for "informação técnica/link" deve ser preservado intacto OBRIGATORIAMENTE abaixo da sinopse (apenas remova eventuais tags/hashtags soltas no final).
+5. Escreva em português brasileiro fluente.
 
 SINOPSE ORIGINAL:
 {sinopse_original}
 
-Escreva apenas o texto da sinopse reescrita, sem cabeçalho ou rodapé."""
+Escreva apenas a sinopse reescrita e as informações técnicas preservadas:"""
 
 
 async def rewrite_synopsis(titulo: str, sinopse_original: str) -> str:
@@ -317,8 +332,8 @@ async def generate_seo_package(candidate: dict) -> dict:
     title_base = extract_title_from_caption(caption)
     logger.info("[SEO] Gerando pacote para: '%s'", title_base)
 
-    # 1. Títulos via Autocomplete (sem IA)
-    title_variants = await generate_title_variants(title_base)
+    # 1. Títulos via Autocomplete (sem IA) e Lógica de Dublagem
+    title_variants = await generate_title_variants(title_base, caption)
     titulo_principal = title_variants[0] if title_variants else f"🎬 COMPLETO: {title_base}"
 
     # 2. Sinopse reescrita pelo Gemini

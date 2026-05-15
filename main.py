@@ -8,12 +8,17 @@ Responsabilidades:
   - Mantém tudo rodando 24/7 de forma assíncrona
 """
 
+from __future__ import annotations
 import asyncio
 import logging
 import sys
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from telegram.ext import Application
+
+if TYPE_CHECKING:
+    from telethon import TelegramClient
 
 from core.config import config
 from bot.bot_controller import create_bot
@@ -44,7 +49,7 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 MINING_HOUR = 6  # Hora para rodar a mineração (6h da manhã no servidor)
 
 
-async def scheduled_mining_loop():
+async def scheduled_mining_loop(client: TelegramClient):
     """
     Loop que aguarda o horário configurado e dispara o ciclo de mineração.
     Roda uma vez por dia automaticamente.
@@ -62,7 +67,7 @@ async def scheduled_mining_loop():
 
         try:
             logger.info("[SCHEDULER] Disparando ciclo de mineração agendado.")
-            await run_full_mining_cycle()
+            await run_full_mining_cycle(client)
         except Exception as e:
             logger.error("[SCHEDULER] Erro no ciclo de mineração: %s", e, exc_info=True)
 
@@ -99,14 +104,15 @@ async def main():
     logger.info("[MAIN] Bot de controle iniciado. Aguardando comandos no Telegram.")
 
     # Inicia o agendador de mineração em background
-    mining_task = asyncio.create_task(scheduled_mining_loop())
+    mining_task = asyncio.create_task(scheduled_mining_loop(telethon))
 
     # Opcional: roda o ciclo uma vez imediatamente ao iniciar
-    logger.info("[MAIN] Rodando ciclo de mineração inicial...")
-    try:
-        await run_full_mining_cycle()
-    except Exception as e:
-        logger.error("[MAIN] Erro no ciclo inicial: %s", e, exc_info=True)
+    # Foi desativado pois o usuário quer que ele só rode manualmente ou 06:00
+    # logger.info("[MAIN] Rodando ciclo de mineração inicial...")
+    # try:
+    #     await run_full_mining_cycle(telethon)
+    # except Exception as e:
+    #     logger.error("[MAIN] Erro no ciclo inicial: %s", e, exc_info=True)
 
     logger.info("[MAIN] Sistema operacional. Pressione Ctrl+C para encerrar.")
 

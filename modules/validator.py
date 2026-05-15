@@ -2,10 +2,10 @@
 modules/validator.py — Validação de Hype Global e montagem do Top 6 Vitrine.
 
 Fase 4 do funil:
-  - Para cada candidato, conta quantos canais Telegram promovem o drama (clone_channels)
+  - Para cada candidato (em memória), conta clones no Telegram
   - Calcula score final: (engagement_rate * 0.6) + (clone_score * 0.4)
-  - Seleciona Top 6 e popula a tabela top6_vitrine
-  - Demais ficam em 'reserve' como Plano B
+  - Seleciona Top 6 e popula a tabela top6_vitrine (estado do painel)
+  - Candidatos NÃO são persistidos — vivem apenas na RAM do ciclo atual
 """
 
 from __future__ import annotations
@@ -33,6 +33,13 @@ W_CLONE = 0.4
 # Máximo de clones esperado para normalização (score de 1.0)
 CLONE_NORM_MAX = 20
 
+# Plano B em memória — candidatos que não entraram no Top 6
+_reserve_pool: list[VideoCandidate] = []
+
+
+def get_reserve_pool() -> list[VideoCandidate]:
+    return _reserve_pool
+
 
 class HypeValidator:
     def __init__(self, client: TelegramClient):
@@ -41,14 +48,14 @@ class HypeValidator:
     async def count_clone_channels(self, title: str) -> int:
         """
         Pesquisa o título na rede Telegram e conta quantos canais/grupos
-        estão promovendo esse drama. Limita a busca para não explodir o rate limit.
+        estão promovendo esse drama.
         """
         title_clean = clean_title(title)
         if not title_clean:
             return 0
 
         try:
-            results = await self.client.get_dialogs(limit=0)  # força cache
+            await self.client.get_dialogs(limit=0)  # força cache de dialogs
             search_results = await self.client(
                 __import__("telethon.tl.functions.contacts", fromlist=["SearchRequest"]).SearchRequest(
                     q=title_clean,
@@ -68,98 +75,111 @@ class HypeValidator:
             return 0
 
     def _calculate_score(self, engagement_rate: float, clone_channels: int) -> float:
-        """
-        Score final normalizado entre 0 e 1.
-        engagement_rate: reactions/views (0 a 1)
-        clone_channels: número de canais que promovem (normalizado pelo máximo esperado)
-        """
         clone_score = min(clone_channels / CLONE_NORM_MAX, 1.0)
         score = (engagement_rate * W_ENGAGEMENT) + (clone_score * W_CLONE)
         return round(score, 6)
 
-    async def validate_candidates(self, candidates: list[dict]) -> list[dict]:
+    async def validate_candidates(self, candidates: list[VideoCandidate]) -> list[VideoCandidate]:
         """
-        Recebe candidatos do banco (com id, views, reactions, caption).
+        Recebe VideoCandidate em memória.
         Atribui hype_score e retorna ordenados do maior para o menor.
         """
         logger.info("[VALIDATOR] Calculando hype para %d candidatos...", len(candidates))
-        scored = []
 
         for cand in candidates:
-            views = cand.get("views", 0) or 0
-            reactions = cand.get("reactions", 0) or 0
-            engagement = reactions / views if views > 0 else 0.0
-
-            title = extract_title_from_caption(cand.get("caption", ""))
+            title = extract_title_from_caption(cand.caption)
             clones = await self.count_clone_channels(title)
-
-            score = self._calculate_score(engagement, clones)
-
-            # Atualiza no banco
-            db.update_candidate(cand["id"], {
-                "hype_score": score,
-                "clone_channels": clones,
-            })
-
-            cand["hype_score"] = score
-            cand["clone_channels"] = clones
-            scored.append(cand)
-
-            # Pequena pausa para não explodir o rate limit do Telegram
+            cand.hype_score = self._calculate_score(cand.engagement_rate, clones)
+            # Pequena pausa para não estourar rate limit
             await asyncio.sleep(1.5)
 
-        scored.sort(key=lambda c: c["hype_score"], reverse=True)
+        candidates.sort(key=lambda c: c.hype_score, reverse=True)
         logger.info("[VALIDATOR] Scoring concluído.")
-        return scored
+        return candidates
 
-    def build_top6_vitrine(self, scored_candidates: list[dict]) -> list[dict]:
+    def build_top6_vitrine(self, scored_candidates: list[VideoCandidate]) -> list[VideoCandidate]:
         """
-        Popula os 6 primeiros candidatos na vitrine.
-        Demais permanecem em 'reserve' como Plano B.
+        Monta o Top 6 na vitrine (estado do painel).
+        - Slots com status 'validated' ou 'uploading' são intocáveis.
+        - Slots 'awaiting_validation' são substituídos pelos novos tops Hype.
+        - Os que não entraram ficam no _reserve_pool em memória.
         """
-        top6 = scored_candidates[:VITRINE_SIZE]
-        reserve = scored_candidates[VITRINE_SIZE:]
+        global _reserve_pool
+
+        current_vitrine = db.get_top6_vitrine()
+
+        # Slots travados (usuário já aprovou ou está enviando)
+        protected_statuses = {"validated", "uploading"}
+        protected_candidate_ids = set()
+        used_slots = set()
+
+        for slot in current_vitrine:
+            if slot["status"] in protected_statuses:
+                used_slots.add(slot["slot_number"])
+                if slot.get("candidate_id"):
+                    protected_candidate_ids.add(slot["candidate_id"])
+
+        # Slots livres (awaiting_validation e vazios são todos substituíveis)
+        free_slots = [i for i in range(1, VITRINE_SIZE + 1) if i not in used_slots]
 
         logger.info(
-            "[VALIDATOR] Top 6 selecionados. %d ficam na reserva (Plano B).",
-            len(reserve),
+            "[VALIDATOR] Slots protegidos: %s. Slots livres: %s",
+            list(used_slots), free_slots
         )
 
-        for i, cand in enumerate(top6, start=1):
-            db.upsert_vitrine_slot(slot_number=i, candidate_id=cand["id"])
-            db.update_candidate(cand["id"], {"status": "vitrine"})
+        assigned = []
+        reserve = list(scored_candidates)
+
+        for slot_num in free_slots:
+            if not reserve:
+                break
+            cand = reserve.pop(0)
+
+            # Persiste apenas o estado do painel (sem candidatos no banco)
+            db.upsert_vitrine_slot_memory(
+                slot_number=slot_num,
+                candidate=cand,
+            )
+            assigned.append(cand)
             logger.info(
-                "[VALIDATOR] Slot %d → '%s' (score=%.4f)",
-                i, extract_title_from_caption(cand.get("caption", "")), cand["hype_score"]
+                "[VALIDATOR] Slot %d → '%s' (hype=%.4f)",
+                slot_num,
+                extract_title_from_caption(cand.caption)[:30],
+                cand.hype_score,
             )
 
-        return top6
+        # Plano B — armazena em memória
+        _reserve_pool = reserve
+        logger.info(
+            "[VALIDATOR] Reposição concluída: %d no painel, %d na reserva RAM.",
+            len(assigned), len(_reserve_pool)
+        )
+        return assigned
 
 
 # ------------------------------------------------------------------ #
-#  Orquestrador: Scraper → Validator → Top 6
+#  Orquestrador: Scraper → Validator → Top 6 (tudo em memória)
 # ------------------------------------------------------------------ #
 
-async def run_full_mining_cycle():
+async def run_full_mining_cycle(client: Optional[TelegramClient] = None):
     """
     Pipeline completo: mineração + validação + montagem do Top 6 Vitrine.
-    Chamado pelo main.py no ciclo agendado.
+    Candidatos vivem APENAS em memória RAM neste ciclo.
+    Apenas posted_history é consultado para anti-duplicata.
     """
     logger.info("=" * 60)
     logger.info("[PIPELINE] Iniciando ciclo de mineração completo")
     logger.info("=" * 60)
 
-    async with TelegramScraper() as scraper:
-        # Fase 1–3: Scraping
-        await scraper.run()
+    async with TelegramScraper(client) as scraper:
+        # Fase 1–3: Scraping → retorna VideoCandidate[] em memória
+        candidates: list[VideoCandidate] = await scraper.run()
 
-        # Carrega candidatos recém inseridos do banco
-        candidates = db.get_candidates_by_status("reserve")
         if not candidates:
-            logger.warning("[PIPELINE] Sem candidatos novos para validar.")
+            logger.warning("[PIPELINE] Sem candidatos para validar.")
             return
 
-        # Fase 4: Hype Global
+        # Fase 4: Score de Hype
         validator = HypeValidator(scraper.client)
         scored = await validator.validate_candidates(candidates)
 
